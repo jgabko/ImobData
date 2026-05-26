@@ -1,12 +1,12 @@
-# scraper/olx_scraper.py
+# scraping/olx_scraper.py
 import logging
 from typing import List, Optional
 from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup, Tag
 
-from scraper.base_scraper import BaseScraper
-from scraper.http_client import HTTPClient
+from scraping.base_scraper import BaseScraper        # ← era scraper.base_scraper
+from scraping.http_client import HTTPClient          # ← era scraper.http_client
 from models.property import RawProperty
 
 logger = logging.getLogger(__name__)
@@ -23,9 +23,7 @@ class OLXScraper(BaseScraper):
     classes CSS, que mudam a cada deploy do frontend.
     """
 
-    _LISTING_URL = (
-        "{base}/imoveis/venda/estado-{state}/{city}"
-    )
+    _LISTING_URL = "{base}/imoveis/venda/estado-{state}/{city}"
 
     def __init__(
         self,
@@ -99,7 +97,10 @@ class OLXScraper(BaseScraper):
         cards = self._find_cards(soup)
 
         if not cards:
-            logger.warning("[OLX] Nenhum card encontrado — estrutura do HTML pode ter mudado.")
+            logger.warning(
+                "[OLX] Nenhum card encontrado — "
+                "estrutura do HTML pode ter mudado."
+            )
             return []
 
         properties: List[RawProperty] = []
@@ -121,7 +122,6 @@ class OLXScraper(BaseScraper):
         cards = soup.find_all(attrs={"data-ds-component": "DS-AdCard"})
 
         if not cards:
-            # Fallback: estrutura mais genérica
             cards = soup.select("section[data-lurker-detail]")
             logger.debug(f"[OLX] Usando seletor fallback: {len(cards)} cards")
 
@@ -149,7 +149,7 @@ class OLXScraper(BaseScraper):
                 neighborhood=neighborhood,
                 city=self.city,
                 url=url,
-                source="olx",
+                source="olx",                         # ← explícito, sem depender de default
             )
 
         except Exception as exc:
@@ -202,7 +202,6 @@ class OLXScraper(BaseScraper):
                 text = el.get_text(strip=True)
                 return text.split(",")[0].strip() or None
 
-        # Fallback: procura ícone de localização pelo SVG
         location_el = card.select_one("[class*='location'], [class*='address']")
         if location_el:
             return location_el.get_text(strip=True).split(",")[0].strip() or None

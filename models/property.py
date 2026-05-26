@@ -8,7 +8,12 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 class RawProperty(BaseModel):
     """
     Representa um imóvel ANTES da limpeza.
-    Todos os campos são Optional[str] porque vêm do HTML — podem ser None ou mal-formatados.
+    Todos os campos são Optional[str] porque vêm do HTML —
+    podem ser None ou mal-formatados.
+
+    Não existe default para `source` aqui: cada scraper
+    passa explicitamente ("olx", "zap", etc.), evitando
+    que um imóvel seja marcado com a fonte errada por omissão.
     """
     title: Optional[str] = None
     raw_price: Optional[str] = None
@@ -16,7 +21,7 @@ class RawProperty(BaseModel):
     neighborhood: Optional[str] = None
     city: Optional[str] = None
     url: Optional[str] = None
-    source: str = Field(default="zap")
+    source: str                                           # ← obrigatório, sem default
     scraped_at: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -52,6 +57,7 @@ class CleanProperty(BaseModel):
         expected = round(self.price / self.area_m2, 2)
         if abs(expected - self.price_per_m2) > 0.05:
             raise ValueError(
-                f"price_per_m2 inconsistente: calculado={expected}, recebido={self.price_per_m2}"
+                f"price_per_m2 inconsistente: "
+                f"calculado={expected}, recebido={self.price_per_m2}"
             )
         return self

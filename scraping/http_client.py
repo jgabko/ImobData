@@ -1,4 +1,4 @@
-# scraper/http_client.py
+# scraping/http_client.py
 import time
 import logging
 import requests
@@ -11,6 +11,7 @@ from tenacity import (
     retry_if_exception_type,
     before_sleep_log,
 )
+
 from config.settings import REQUEST_DELAY_SECONDS
 
 logger = logging.getLogger(__name__)

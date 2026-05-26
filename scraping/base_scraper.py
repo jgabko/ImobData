@@ -1,20 +1,19 @@
-# scraper/base_scraper.py
+# scraping/base_scraper.py
 from abc import ABC, abstractmethod
 from typing import List
 
 from models.property import RawProperty
-from scraper.http_client import HTTPClient
+from scraping.http_client import HTTPClient          # ← era scraper.http_client
 
 
 class BaseScraper(ABC):
     """
     Contrato base para todos os scrapers do pipeline.
 
-    Mudança em relação à versão Playwright:
-    - Recebe um HTTPClient injetado (Dependency Injection)
-      em vez de criar seu próprio browser.
-    - Isso permite trocar o client em testes (mock)
-      sem alterar o scraper.
+    Recebe um HTTPClient injetado (Dependency Injection)
+    em vez de gerenciar seu próprio mecanismo de transporte.
+    Isso permite substituir o client em testes (mock)
+    sem alterar nenhum scraper concreto.
     """
 
     def __init__(
