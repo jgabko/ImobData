@@ -1,0 +1,19 @@
+# Scraping
+beautifulsoup4==4.12.3
+requests==2.32.2
+lxml==5.2.2
+fake-useragent==1.5.1
+
+# Validação e modelos
+pydantic==2.7.1
+
+# Transformação
+pandas==2.2.2
+
+# Resiliência
+tenacity==8.3.0
+
+# Infraestrutura
+python-dotenv==1.0.1
+python-telegram-bot==21.3
+psycopg2-binary==2.9.9
