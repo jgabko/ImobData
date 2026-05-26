@@ -33,7 +33,9 @@ class CSVWriter:
         records = [p.model_dump() for p in properties]
         df = pd.DataFrame(records)
         df.to_csv(filepath, index=False, encoding="utf-8-sig")
-        logger.info(f"[CSVWriter] {len(records)} registros brutos salvos em '{filepath}'")
+        logger.info(
+            f"[CSVWriter] {len(records)} registros brutos salvos em '{filepath}'"
+        )
         return filepath
 
     def write_clean(self, properties: List[CleanProperty]) -> str:
@@ -42,5 +44,7 @@ class CSVWriter:
         records = [p.model_dump() for p in properties]
         df = pd.DataFrame(records)
         df.to_csv(filepath, index=False, encoding="utf-8-sig")
-        logger.info(f"[CSVWriter] {len(records)} registros limpos salvos em '{filepath}'")
+        logger.info(
+            f"[CSVWriter] {len(records)} registros limpos salvos em '{filepath}'"
+        )
         return filepath

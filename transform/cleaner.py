@@ -1,4 +1,4 @@
-# transformer/cleaner.py
+# transform/cleaner.py
 import re
 import logging
 from typing import List, Optional
@@ -14,7 +14,8 @@ logger = logging.getLogger(__name__)
 class PropertyCleaner:
     """
     Recebe uma lista de RawProperty e retorna uma lista de CleanProperty.
-    Responsabilidade única: transformar e validar dados, não salvar nem alertar.
+    Responsabilidade única: transformar e validar dados,
+    não salvar nem alertar.
     """
 
     PRICE_PATTERN = re.compile(r"[\d.,]+")
@@ -71,7 +72,9 @@ class PropertyCleaner:
 
     def _drop_invalid_rows(self, df: pd.DataFrame) -> pd.DataFrame:
         before = len(df)
-        df = df.dropna(subset=["price", "area_m2", "price_per_m2", "neighborhood", "title"])
+        df = df.dropna(
+            subset=["price", "area_m2", "price_per_m2", "neighborhood", "title"]
+        )
         df = df[df["price"] > 10_000]
         df = df[df["area_m2"] > 10]
         df = df[df["price_per_m2"] < 50_000]
@@ -104,6 +107,8 @@ class PropertyCleaner:
                 )
                 clean.append(prop)
             except ValidationError as exc:
-                logger.warning(f"[Cleaner] Validação falhou para '{row.get('title')}': {exc}")
+                logger.warning(
+                    f"[Cleaner] Validação falhou para '{row.get('title')}': {exc}"
+                )
         logger.info(f"[Cleaner] {len(clean)} imóveis válidos após limpeza")
         return clean
