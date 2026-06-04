@@ -1,13 +1,26 @@
 # scraping/olx_scraper.py
+import asyncio
 import logging
 from typing import List, Optional
 from urllib.parse import urljoin
 
-from bs4 import BeautifulSoup, Tag
+from playwright.async_api import (
+    async_playwright,
+    Page,
+    Locator,
+    TimeoutError as PlaywrightTimeout,
+)
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+    before_sleep_log,
+)
 
-from scraping.base_scraper import BaseScraper        # ← era scraper.base_scraper
-from scraping.http_client import HTTPClient          # ← era scraper.http_client
+from scraping.base_scraper import BaseScraper
 from models.property import RawProperty
+from config.settings import REQUEST_DELAY_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -16,23 +29,18 @@ _OLX_BASE = "https://www.olx.com.br"
 
 class OLXScraper(BaseScraper):
     """
-    Scraper concreto para OLX Brasil usando BeautifulSoup.
+    Scraper concreto para OLX Brasil usando Playwright.
 
-    Estratégia de seleção de elementos:
-    Priorizamos atributos 'data-*' e IDs estáveis em vez de
-    classes CSS, que mudam a cada deploy do frontend.
+    Diferença fundamental em relação ao BeautifulSoup:
+    - Opera sobre um browser real com JavaScript ativo.
+    - Todos os métodos são async — retornam coroutines.
+    - Usa Locators em vez de parsear HTML como string.
     """
 
     _LISTING_URL = "{base}/imoveis/venda/estado-{state}/{city}"
 
-    def __init__(
-        self,
-        city: str,
-        state: str,
-        max_pages: int,
-        http_client: HTTPClient,
-    ):
-        super().__init__(city, state, max_pages, http_client)
+    def __init__(self, city: str, state: str, max_pages: int):
+        super().__init__(city, state, max_pages)
         self._base_listing_url = self._LISTING_URL.format(
             base=_OLX_BASE,
             state=self.state,
@@ -41,106 +49,129 @@ class OLXScraper(BaseScraper):
 
     # ── Público ──────────────────────────────────────────────────
 
-    def scrape(self) -> List[RawProperty]:
+    async def scrape(self) -> List[RawProperty]:
         """
-        Itera pelas páginas de listagem e acumula os imóveis.
-        Encerra cedo se uma página vier vazia (fim da paginação).
+        Abre o browser, itera pelas páginas e fecha tudo ao final.
+        O `async with async_playwright()` garante que o processo
+        do Chromium seja encerrado mesmo se uma exceção ocorrer.
         """
         all_properties: List[RawProperty] = []
 
-        for page_number in range(1, self.max_pages + 1):
-            url = self._build_url(page_number)
-            logger.info(f"[OLX] Página {page_number}/{self.max_pages} → {url}")
+        async with async_playwright() as playwright:
+            browser = await playwright.chromium.launch(headless=True)
 
-            try:
-                html = self._client.get(url)
-            except Exception as exc:
-                logger.error(f"[OLX] Falha ao buscar página {page_number}: {exc}")
-                break
-
-            properties = self._parse_page(html)
-
-            if not properties:
-                logger.info(f"[OLX] Página {page_number} sem imóveis — encerrando.")
-                break
-
-            all_properties.extend(properties)
-            logger.info(
-                f"[OLX] Página {page_number}: {len(properties)} imóveis | "
-                f"Total: {len(all_properties)}"
+            context = await browser.new_context(
+                user_agent=(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/124.0.0.0 Safari/537.36"
+                ),
+                viewport={"width": 1280, "height": 800},
+                locale="pt-BR",
             )
 
+            for page_number in range(1, self.max_pages + 1):
+                url = self._build_url(page_number)
+                logger.info(f"[OLX] Página {page_number}/{self.max_pages} → {url}")
+
+                page = await context.new_page()
+                try:
+                    properties = await self._fetch_page_with_retry(page, url)
+
+                    if not properties:
+                        logger.info(
+                            f"[OLX] Página {page_number} sem imóveis — encerrando."
+                        )
+                        break
+
+                    all_properties.extend(properties)
+                    logger.info(
+                        f"[OLX] Página {page_number}: {len(properties)} imóveis | "
+                        f"Total: {len(all_properties)}"
+                    )
+
+                except Exception as exc:
+                    logger.error(
+                        f"[OLX] Falha definitiva na página {page_number}: {exc}"
+                    )
+                    break
+
+                finally:
+                    await page.close()
+
+                if page_number < self.max_pages:
+                    await asyncio.sleep(REQUEST_DELAY_SECONDS)
+
+            await browser.close()
+
+        logger.info(f"[OLX] Extração concluída. Total: {len(all_properties)} imóveis")
         return all_properties
 
-    # ── Privado: Construção de URL ────────────────────────────────
+    # ── Privado: URL ─────────────────────────────────────────────
 
     def _build_url(self, page_number: int) -> str:
-        """
-        OLX usa query param ?o=N para paginação.
-        Página 1 não usa o parâmetro (URL limpa).
-        """
         if page_number == 1:
             return self._base_listing_url
         return f"{self._base_listing_url}?o={page_number}"
 
+    # ── Privado: Navegação com Retry ─────────────────────────────
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type((PlaywrightTimeout, ConnectionError)),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
+        reraise=True,
+    )
+    async def _fetch_page_with_retry(self, page: Page, url: str) -> List[RawProperty]:
+        """
+        Navega até a URL e aguarda os cards de imóveis aparecerem.
+        Se o seletor não aparecer em 15s, PlaywrightTimeout é lançado
+        e o Tenacity tenta novamente com backoff exponencial.
+        """
+        await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
+        await page.wait_for_selector(
+            '[data-ds-component="DS-AdCard"]', timeout=15_000
+        )
+        return await self._parse_page(page)
+
     # ── Privado: Parsing ─────────────────────────────────────────
 
-    def _parse_page(self, html: str) -> List[RawProperty]:
+    async def _parse_page(self, page: Page) -> List[RawProperty]:
         """
-        Parseia o HTML de uma página de listagem.
-
-        BeautifulSoup recebe o HTML como string e o
-        transforma em uma árvore de objetos navegável —
-        o DOM em memória.
+        Coleta todos os cards visíveis na página e extrai dados de cada um.
+        `locator.all()` materializa todos os elementos correspondentes
+        ao seletor em uma lista de Locators individuais.
         """
-        soup = BeautifulSoup(html, "lxml")
-        cards = self._find_cards(soup)
+        properties: List[RawProperty] = []
+        cards = await page.locator('[data-ds-component="DS-AdCard"]').all()
 
         if not cards:
-            logger.warning(
-                "[OLX] Nenhum card encontrado — "
-                "estrutura do HTML pode ter mudado."
-            )
+            logger.warning("[OLX] Nenhum card encontrado na página.")
             return []
 
-        properties: List[RawProperty] = []
         for card in cards:
-            prop = self._extract_property(card)
+            prop = await self._extract_property(card)
             if prop is not None:
                 properties.append(prop)
 
         return properties
 
-    def _find_cards(self, soup: BeautifulSoup) -> List[Tag]:
+    # ── Privado: Extração de Imóvel ──────────────────────────────
+
+    async def _extract_property(self, card: Locator) -> Optional[RawProperty]:
         """
-        Localiza os cards de anúncios na página.
-
-        Usamos uma busca por atributo data-ds-component porque
-        é mais semântica e estável que seletores por classe CSS.
-        Se não encontrar, tenta o seletor de fallback por section.
-        """
-        cards = soup.find_all(attrs={"data-ds-component": "DS-AdCard"})
-
-        if not cards:
-            cards = soup.select("section[data-lurker-detail]")
-            logger.debug(f"[OLX] Usando seletor fallback: {len(cards)} cards")
-
-        return cards
-
-    def _extract_property(self, card: Tag) -> Optional[RawProperty]:
-        """
-        Extrai os campos brutos de um único card de anúncio.
-
-        Todo campo pode ser None — a ausência de dado é
-        informação válida nesta etapa. A limpeza e rejeição
-        acontecem no transformer.
+        Extrai os campos brutos de um único card.
+        Capturamos PlaywrightTimeout separado das outras exceções
+        porque é o erro mais comum (elemento não carregou a tempo)
+        e merece uma mensagem de log diferente.
         """
         try:
-            title = self._extract_title(card)
-            raw_price = self._extract_price(card)
-            raw_area = self._extract_area(card)
-            neighborhood = self._extract_neighborhood(card)
-            url = self._extract_url(card)
+            title = await self._extract_title(card)
+            raw_price = await self._extract_price(card)
+            raw_area = await self._extract_area(card)
+            neighborhood = await self._extract_neighborhood(card)
+            url = await self._extract_url(card)
 
             return RawProperty(
                 title=title,
@@ -149,72 +180,56 @@ class OLXScraper(BaseScraper):
                 neighborhood=neighborhood,
                 city=self.city,
                 url=url,
-                source="olx",                         # ← explícito, sem depender de default
+                source="olx",
             )
 
+        except PlaywrightTimeout:
+            logger.warning("[OLX] Timeout ao extrair card — pulando")
+            return None
         except Exception as exc:
-            logger.debug(f"[OLX] Erro ao extrair card: {exc}")
+            logger.debug(f"[OLX] Erro inesperado ao extrair card: {exc}")
             return None
 
     # ── Privado: Extratores de Campo ──────────────────────────────
 
-    def _extract_title(self, card: Tag) -> Optional[str]:
-        """
-        Tenta h2 primeiro (semântico), depois h3, depois
-        qualquer elemento com role='heading'.
-        """
+    async def _extract_title(self, card: Locator) -> Optional[str]:
         for selector in ["h2", "h3", "[role='heading']"]:
-            el = card.select_one(selector)
-            if el:
-                return el.get_text(strip=True) or None
+            el = card.locator(selector)
+            if await el.count() > 0:
+                text = await el.first.inner_text(timeout=3_000)
+                return text.strip() or None
         return None
 
-    def _extract_price(self, card: Tag) -> Optional[str]:
-        """
-        Preço na OLX fica em um elemento com texto começando em 'R$'.
-        Percorre todos os elementos de texto e busca esse padrão.
-        """
-        for el in card.find_all(True):
-            text = el.get_text(strip=True)
-            if text.startswith("R$") and len(text) < 30:
-                return text
+    async def _extract_price(self, card: Locator) -> Optional[str]:
+        for selector in [
+            '[data-ds-component="DS-Text"][class*="price"]',
+            '[class*="price"]',
+        ]:
+            el = card.locator(selector)
+            if await el.count() > 0:
+                text = await el.first.inner_text(timeout=3_000)
+                if text.strip().startswith("R$"):
+                    return text.strip()
         return None
 
-    def _extract_area(self, card: Tag) -> Optional[str]:
-        """
-        Busca qualquer texto que contenha 'm²' ou 'm2'.
-        A limpeza do número fica para o transformer.
-        """
-        for el in card.find_all(True):
-            text = el.get_text(strip=True)
-            if ("m²" in text or "m2" in text.lower()) and len(text) < 20:
-                return text
+    async def _extract_area(self, card: Locator) -> Optional[str]:
+        all_texts = await card.locator("*").all_inner_texts()
+        for text in all_texts:
+            if ("m²" in text or "m2" in text.lower()) and len(text.strip()) < 20:
+                return text.strip()
         return None
 
-    def _extract_neighborhood(self, card: Tag) -> Optional[str]:
-        """
-        Localização geralmente vem em um elemento com
-        data-testid contendo 'location' ou 'address'.
-        """
+    async def _extract_neighborhood(self, card: Locator) -> Optional[str]:
         for testid in ["olx-adcard-location", "ad-card-location"]:
-            el = card.find(attrs={"data-testid": testid})
-            if el:
-                text = el.get_text(strip=True)
+            el = card.locator(f'[data-testid="{testid}"]')
+            if await el.count() > 0:
+                text = await el.inner_text(timeout=3_000)
                 return text.split(",")[0].strip() or None
-
-        location_el = card.select_one("[class*='location'], [class*='address']")
-        if location_el:
-            return location_el.get_text(strip=True).split(",")[0].strip() or None
-
         return None
 
-    def _extract_url(self, card: Tag) -> Optional[str]:
-        """
-        O link principal do card — sempre uma tag <a> com href.
-        Usamos urljoin para garantir URL absoluta mesmo se
-        o href vier como caminho relativo ('/imoveis/...').
-        """
-        link = card.find("a", href=True)
-        if link:
-            return urljoin(_OLX_BASE, link["href"])
+    async def _extract_url(self, card: Locator) -> Optional[str]:
+        link = card.locator("a").first
+        href = await link.get_attribute("href", timeout=3_000)
+        if href:
+            return urljoin(_OLX_BASE, href)
         return None

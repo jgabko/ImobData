@@ -29,7 +29,7 @@ class PropertyCleaner:
         return self._to_models(df)
 
     def _to_dataframe(self, properties: List[RawProperty]) -> pd.DataFrame:
-        records = [p.model_dump() for p in properties]
+        records = [p.model_dump() for p in properties]#Transforma em dict (da lib pydantic)
         return pd.DataFrame(records)
 
     def _apply_transformations(self, df: pd.DataFrame) -> pd.DataFrame:

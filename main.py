@@ -1,4 +1,5 @@
 # main.py
+import asyncio
 import logging
 import sys
 
@@ -9,9 +10,8 @@ from config.settings import (
     DATA_LAKE_PATH,
     DATA_WAREHOUSE_PATH,
 )
-from scraping.http_client import HTTPClient          # ← pacote correto: scraping
-from scraping.olx_scraper import OLXScraper          # ← pacote correto: scraping
-from transform.cleaner import PropertyCleaner        # ← pacote correto: transform
+from scraping.olx_scraper import OLXScraper
+from transform.cleaner import PropertyCleaner
 from storage.csv_writer import CSVWriter
 
 logging.basicConfig(
@@ -26,42 +26,39 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def run_pipeline() -> None:                          # ← síncrono: sem async/await
+async def run_pipeline() -> None:
     logger.info("=" * 60)
     logger.info("PIPELINE DE ARBITRAGEM IMOBILIÁRIA — INICIADO")
     logger.info("=" * 60)
 
-    with HTTPClient() as client:
+    # ── Etapa 1: Extração ──────────────────────────────────────
+    logger.info("[Pipeline] Etapa 1/3 — Extração")
+    scraper = OLXScraper(
+        city=TARGET_CITY,
+        state=TARGET_STATE,
+        max_pages=MAX_PAGES,
+    )
+    raw_properties = await scraper.scrape()
 
-        # ── Etapa 1: Extração ──────────────────────────────────
-        logger.info("[Pipeline] Etapa 1/3 — Extração")
-        scraper = OLXScraper(
-            city=TARGET_CITY,
-            state=TARGET_STATE,
-            max_pages=MAX_PAGES,
-            http_client=client,
-        )
-        raw_properties = scraper.scrape()
+    if not raw_properties:
+        logger.warning("[Pipeline] Nenhum imóvel extraído. Encerrando.")
+        return
 
-        if not raw_properties:
-            logger.warning("[Pipeline] Nenhum imóvel extraído. Encerrando.")
-            return
+    # ── Etapa 2: Persistência bruta (Data Lake) ────────────────
+    writer = CSVWriter(
+        raw_path=DATA_LAKE_PATH,
+        processed_path=DATA_WAREHOUSE_PATH,
+    )
+    writer.write_raw(raw_properties)
 
-        # ── Etapa 2: Persistência bruta (Data Lake) ────────────
-        writer = CSVWriter(
-            raw_path=DATA_LAKE_PATH,
-            processed_path=DATA_WAREHOUSE_PATH,
-        )
-        writer.write_raw(raw_properties)
+    # ── Etapa 3: Transformação e Validação ─────────────────────
+    logger.info("[Pipeline] Etapa 2/3 — Transformação")
+    cleaner = PropertyCleaner()
+    clean_properties = cleaner.clean(raw_properties)
 
-        # ── Etapa 3: Transformação e Validação ─────────────────
-        logger.info("[Pipeline] Etapa 2/3 — Transformação")
-        cleaner = PropertyCleaner()
-        clean_properties = cleaner.clean(raw_properties)
-
-        # ── Etapa 4: Persistência limpa ────────────────────────
-        logger.info("[Pipeline] Etapa 3/3 — Persistência")
-        writer.write_clean(clean_properties)
+    # ── Etapa 4: Persistência limpa ────────────────────────────
+    logger.info("[Pipeline] Etapa 3/3 — Persistência")
+    writer.write_clean(clean_properties)
 
     logger.info("=" * 60)
     logger.info(
@@ -73,4 +70,4 @@ def run_pipeline() -> None:                          # ← síncrono: sem async/
 
 
 if __name__ == "__main__":
-    run_pipeline()                                   # ← sem asyncio.run()
+    asyncio.run(run_pipeline())
