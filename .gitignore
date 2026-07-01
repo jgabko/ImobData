@@ -1,0 +1,4 @@
+processing/ml_model/melhor_modelo_precificacao.pkl
+*.pkl
+.env
+*.json
