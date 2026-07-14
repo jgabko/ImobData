@@ -1,56 +1,29 @@
 """
-Camada de acesso ao Supabase usada pelo pipeline de precificação, pelo
+Camada de acesso a dados usada pelo pipeline de precificação, pelo
 geocode_cep.py e pelo dashboard.
 
-Tabelas esperadas (ajuste os nomes/colunas conforme seu schema real):
+Antes usava Supabase; agora usa SQLite local (persistence/db.py).
+As assinaturas de todas as funções foram mantidas iguais, então
+dashboard.py, pipeline.py, geocode.py etc. não precisam mudar nada.
 
+Tabelas (ver schema completo em persistence/db.py):
   imoveis_raw
-    id (pk), preco, condominio, iptu, bairro, cidade, estado, cep,
-    metragem, quartos, banheiros, vagas,
+    id (pk autoincrement), url (unique), preco, condominio, iptu, bairro,
+    cidade, estado, cep, metragem, quartos, banheiros, vagas,
     caracteristicas_imovel (text/json), caracteristicas_condominio (text/json),
-    checked (bool, default false)   <- vira TRUE depois que o preço é previsto/comparado
-
+    checked (bool, default 0)
   precos_previstos
-    imovel_id (fk -> imoveis_raw.id, idealmente UNIQUE para o upsert funcionar),
-    preco_real, preco_previsto, diferenca, status, criado_em (default now())
-
+    imovel_id (fk -> imoveis_raw.id, pk),
+    preco_real, preco_previsto, diferenca, status, criado_em (default now)
   cep_coordenadas
     cep (pk), latitude, longitude, endereco
-
-SQL de referência para criar o que ainda não existir:
-
-  alter table imoveis_raw add column if not exists checked boolean default false;
-
-  create table if not exists precos_previstos (
-      imovel_id   bigint primary key references imoveis_raw(id),
-      preco_real      numeric,
-      preco_previsto  numeric,
-      diferenca       numeric,
-      status          text,
-      criado_em       timestamptz default now()
-  );
-
-  create table if not exists cep_coordenadas (
-      cep       text primary key,
-      latitude  double precision,
-      longitude double precision,
-      endereco  text
-  );
 """
-import os
-
 import pandas as pd
-from dotenv import load_dotenv
-from supabase import Client, create_client
 
-load_dotenv()
+from persistence.db import get_connection, db_cursor, rows_to_dicts, init_db
 
-SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
-if not SUPABASE_URL or not SUPABASE_KEY:
-    raise ValueError("Credenciais do Supabase não encontradas no arquivo .env")
-
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+# Garante que as tabelas existem assim que este módulo é importado
+init_db()
 
 
 # ----------------------------------------------------------------------
@@ -58,11 +31,12 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 # ----------------------------------------------------------------------
 def fetch_imoveis_pendentes() -> list:
     """Imóveis que já têm preço real (raspado da OLX) mas ainda não tiveram
-    o preço de mercado previsto/comparado (checked = false)."""
+    o preço de mercado previsto/comparado (checked = 0)."""
     print("[DB] Buscando imóveis pendentes de precificação...")
     try:
-        resp = supabase.table("imoveis_raw").select("*").is_("checked", "FALSE").execute()
-        dados = resp.data
+        with db_cursor() as (conn, cur):
+            cur.execute("SELECT * FROM imoveis_raw WHERE checked = 0")
+            dados = rows_to_dicts(cur.fetchall())
         print(f"[DB] {len(dados)} imóveis encontrados.")
         return dados
     except Exception as e:
@@ -72,18 +46,31 @@ def fetch_imoveis_pendentes() -> list:
 
 def salvar_comparacao_preco(imovel_id, preco_real, preco_previsto, diferenca, status):
     """Salva a comparação (preço real x previsto) e marca o imóvel como
-    processado (checked = true)."""
+    processado (checked = 1)."""
     try:
-        registro = {
-            "imovel_id": imovel_id,
-            "preco_real": float(round(float(preco_real), 2)),
-            "preco_previsto": int(round(float(preco_previsto))),
-            "diferenca": float(round(float(diferenca), 2)),
-            "status": status,
-        }
-        supabase.table("precos_previstos").upsert(registro, on_conflict="imovel_id").execute()
-        supabase.table("imoveis_raw").update({"checked": True}).eq("id", imovel_id).execute()
-        print(f"[DB] OK: imóvel {imovel_id} -> previsto R$ {registro['preco_previsto']:,} ({status})")
+        preco_real = float(round(float(preco_real), 2))
+        preco_previsto = int(round(float(preco_previsto)))
+        diferenca = float(round(float(diferenca), 2))
+
+        with db_cursor() as (conn, cur):
+            cur.execute(
+                """
+                INSERT INTO precos_previstos
+                    (imovel_id, preco_real, preco_previsto, diferenca, status, criado_em)
+                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(imovel_id) DO UPDATE SET
+                    preco_real = excluded.preco_real,
+                    preco_previsto = excluded.preco_previsto,
+                    diferenca = excluded.diferenca,
+                    status = excluded.status,
+                    criado_em = CURRENT_TIMESTAMP
+                """,
+                (imovel_id, preco_real, preco_previsto, diferenca, status),
+            )
+            cur.execute(
+                "UPDATE imoveis_raw SET checked = 1 WHERE id = ?", (imovel_id,)
+            )
+        print(f"[DB] OK: imóvel {imovel_id} -> previsto R$ {preco_previsto:,} ({status})")
     except Exception as e:
         print(f"[DB] Erro ao salvar comparação do imóvel {imovel_id}: {e}")
 
@@ -94,8 +81,11 @@ def salvar_comparacao_preco(imovel_id, preco_real, preco_previsto, diferenca, st
 def fetch_ceps_unicos() -> list:
     """Todos os CEPs distintos presentes em imoveis_raw."""
     try:
-        resp = supabase.table("imoveis_raw").select("cep").execute()
-        return sorted({row["cep"] for row in resp.data if row.get("cep")})
+        with db_cursor() as (conn, cur):
+            cur.execute(
+                "SELECT DISTINCT cep FROM imoveis_raw WHERE cep IS NOT NULL AND cep != ''"
+            )
+            return sorted(row["cep"] for row in cur.fetchall())
     except Exception as e:
         print(f"[DB] Erro ao buscar CEPs: {e}")
         return []
@@ -103,8 +93,9 @@ def fetch_ceps_unicos() -> list:
 
 def fetch_ceps_ja_geocodificados() -> set:
     try:
-        resp = supabase.table("cep_coordenadas").select("cep").execute()
-        return {row["cep"] for row in resp.data}
+        with db_cursor() as (conn, cur):
+            cur.execute("SELECT cep FROM cep_coordenadas")
+            return {row["cep"] for row in cur.fetchall()}
     except Exception as e:
         print(f"[DB] Erro ao buscar CEPs já geocodificados: {e}")
         return set()
@@ -112,14 +103,53 @@ def fetch_ceps_ja_geocodificados() -> set:
 
 def salvar_cep_coordenadas(cep, latitude, longitude, endereco):
     try:
-        supabase.table("cep_coordenadas").upsert({
-            "cep": cep,
-            "latitude": latitude,
-            "longitude": longitude,
-            "endereco": endereco,
-        }, on_conflict="cep").execute()
+        with db_cursor() as (conn, cur):
+            cur.execute(
+                """
+                INSERT INTO cep_coordenadas (cep, latitude, longitude, endereco)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(cep) DO UPDATE SET
+                    latitude = excluded.latitude,
+                    longitude = excluded.longitude,
+                    endereco = excluded.endereco
+                """,
+                (cep, latitude, longitude, endereco),
+            )
     except Exception as e:
         print(f"[DB] Erro ao salvar coordenadas do CEP {cep}: {e}")
+
+
+def fetch_ceps_com_coordenadas_ok() -> set:
+    """CEPs que já têm latitude E longitude preenchidas em cep_coordenadas."""
+    try:
+        with db_cursor() as (conn, cur):
+            cur.execute(
+                """
+                SELECT cep FROM cep_coordenadas
+                WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+                """
+            )
+            return {row["cep"] for row in cur.fetchall()}
+    except Exception as e:
+        print(f"[DB] Erro ao buscar CEPs com coordenadas OK: {e}")
+        return set()
+
+
+def fetch_ceps_coordenadas_nulas() -> list:
+    """Linhas de cep_coordenadas com latitude OU longitude nulas —
+    candidatas a serem re-geocodificadas."""
+    try:
+        with db_cursor() as (conn, cur):
+            cur.execute(
+                """
+                SELECT cep, endereco FROM cep_coordenadas
+                WHERE latitude IS NULL OR longitude IS NULL
+                """
+            )
+            return rows_to_dicts(cur.fetchall())
+    except Exception as e:
+        print(f"[DB] Erro ao buscar CEPs com coordenadas nulas: {e}")
+        return []
 
 
 # ----------------------------------------------------------------------
@@ -128,57 +158,20 @@ def salvar_cep_coordenadas(cep, latitude, longitude, endereco):
 def fetch_dados_dashboard() -> pd.DataFrame:
     """Junta imoveis_raw + precos_previstos + cep_coordenadas em um único
     DataFrame, pronto para os gráficos e o mapa do dashboard."""
-    imoveis = pd.DataFrame(supabase.table("imoveis_raw").select("*").execute().data)
-    previstos = pd.DataFrame(supabase.table("precos_previstos").select("*").execute().data)
-    coords = pd.DataFrame(supabase.table("cep_coordenadas").select("*").execute().data)
+    conn = get_connection()
+    try:
+        imoveis = pd.read_sql_query("SELECT * FROM imoveis_raw", conn)
+        previstos = pd.read_sql_query("SELECT * FROM precos_previstos", conn)
+        coords = pd.read_sql_query("SELECT * FROM cep_coordenadas", conn)
+    finally:
+        conn.close()
 
     if imoveis.empty or previstos.empty:
         return pd.DataFrame()
 
-    df = imoveis.merge(previstos, left_on="id", right_on="imovel_id", how="inner", suffixes=("", "_prev"))
+    df = imoveis.merge(
+        previstos, left_on="id", right_on="imovel_id", how="inner", suffixes=("", "_prev")
+    )
     if not coords.empty:
         df = df.merge(coords, on="cep", how="left")
     return df
-# Adicionar estas duas funções ao supabase_f.py, na seção de
-# "Geocodificação de CEPs" (podem ficar logo depois de
-# fetch_ceps_ja_geocodificados — essa antiga pode até ser removida, já
-# que geocode.py e preencher_coordenadas_nulas.py não usam mais ela).
-
-
-def fetch_ceps_com_coordenadas_ok() -> set:
-    """CEPs que já têm latitude E longitude preenchidas em cep_coordenadas.
-
-    Diferente da antiga fetch_ceps_ja_geocodificados (que contava qualquer
-    linha existente, mesmo com coordenadas nulas), esta função só considera
-    'resolvido' quem realmente tem lat/lon — evita que um CEP que falhou
-    uma vez fique travado como 'já feito' para sempre.
-    """
-    try:
-        resp = (
-            supabase.table("cep_coordenadas")
-            .select("cep")
-            .not_.is_("latitude", "null")
-            .not_.is_("longitude", "null")
-            .execute()
-        )
-        return {row["cep"] for row in resp.data}
-    except Exception as e:
-        print(f"[DB] Erro ao buscar CEPs com coordenadas OK: {e}")
-        return set()
-
-
-def fetch_ceps_coordenadas_nulas() -> list:
-    """Linhas de cep_coordenadas com latitude OU longitude nulas —
-    candidatas a serem re-geocodificadas pelo preencher_coordenadas_nulas.py.
-    """
-    try:
-        resp = (
-            supabase.table("cep_coordenadas")
-            .select("cep, endereco")
-            .or_("latitude.is.null,longitude.is.null")
-            .execute()
-        )
-        return resp.data
-    except Exception as e:
-        print(f"[DB] Erro ao buscar CEPs com coordenadas nulas: {e}")
-        return []

@@ -1,46 +1,67 @@
-import os
-from supabase import create_client, Client
-from dotenv import load_dotenv
+"""
+Camada de gravação usada pelo scraper (olx_async.py) para salvar imóveis
+raspados. Antes usava Supabase; agora grava direto no SQLite local.
 
-# Carrega as variáveis de ambiente do arquivo .env
-load_dotenv()
+Mantém os mesmos nomes de função (get_supabase_client / salvar_no_supabase)
+por compatibilidade, mesmo não havendo mais "cliente" de fato — só que
+get_supabase_client agora retorna a conexão sqlite3.
+"""
+import sqlite3
 
-SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+from persistence.db import get_connection, init_db
 
-def get_supabase_client() -> Client:
-    """
-    Inicializa e retorna o cliente do Supabase.
-    """
-    if not SUPABASE_URL or not SUPABASE_KEY:
-        raise ValueError("As credenciais do Supabase não foram encontradas. Verifique o seu arquivo .env.")
-    return create_client(SUPABASE_URL, SUPABASE_KEY)
+# Garante que as tabelas existem assim que este módulo é importado
+init_db()
+
+
+def get_supabase_client() -> sqlite3.Connection:
+    """Mantido por compatibilidade com o código antigo. Retorna uma conexão
+    sqlite3 em vez de um cliente Supabase."""
+    return get_connection()
+
 
 def salvar_no_supabase(dados: list[dict], nome_tabela: str = "imoveis_raw"):
     """
-    Recebe uma lista de dicionários e realiza um UPSERT na tabela do Supabase.
-    Ignora registros que já possuam a mesma URL cadastrada (evita duplicatas).
+    Recebe uma lista de dicionários e realiza um INSERT OR IGNORE na tabela
+    local. Registros cuja 'url' já exista são simplesmente ignorados
+    (mesmo comportamento do upsert com ignore_duplicates=True que era usado
+    no Supabase).
     """
     if not dados:
-        print("Aviso: Nenhum dado disponível para enviar ao Supabase.")
+        print("Aviso: Nenhum dado disponível para salvar.")
         return None
 
-    supabase = get_supabase_client()
-    
+    conn = get_connection()
     try:
         print(f"\n[BANCO DE DADOS] Tentando inserir {len(dados)} imóveis na tabela '{nome_tabela}'...")
-        
-        # O método UPSERT verifica a coluna 'url'. 
-        # Se a url já existir, 'ignore_duplicates=True' faz ele pular e não dar erro.
-        resposta = supabase.table(nome_tabela).upsert(
-            dados, 
-            on_conflict="url", 
-            ignore_duplicates=True
-        ).execute()
-        
-        print(f"✅ Processamento concluído! Registros novos salvos no banco. (Duplicatas ignoradas).")
-        return resposta.data
-        
+
+        # Colunas dinâmicas: usa as chaves do primeiro dict como referência.
+        # Assume que todos os dicts da lista têm o mesmo formato de chaves
+        # (mesmo comportamento implícito que o upsert em lote do Supabase).
+        colunas = list(dados[0].keys())
+        placeholders = ", ".join("?" for _ in colunas)
+        colunas_sql = ", ".join(colunas)
+
+        query = (
+            f"INSERT OR IGNORE INTO {nome_tabela} ({colunas_sql}) "
+            f"VALUES ({placeholders})"
+        )
+
+        valores = [tuple(d.get(c) for c in colunas) for d in dados]
+
+        cur = conn.cursor()
+        cur.executemany(query, valores)
+        conn.commit()
+
+        inseridos = cur.rowcount if cur.rowcount is not None else 0
+        print(
+            f"✅ Processamento concluído! {inseridos} registro(s) novo(s) salvo(s). "
+            f"(Duplicatas por 'url' ignoradas)."
+        )
+        return valores
     except Exception as e:
-        print(f"❌ Erro ao inserir dados no Supabase: {e}")
+        conn.rollback()
+        print(f"❌ Erro ao inserir dados no banco local: {e}")
         return None
+    finally:
+        conn.close()
