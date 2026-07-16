@@ -1,0 +1,96 @@
+/* ============================================================
+   ImobData — Modal de detalhe do imóvel (Etapa 6)
+   Depende de css/base.css.
+   ============================================================ */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(27, 35, 33, 0.55);
+  display: none;
+  align-items: flex-start;
+  justify-content: center;
+  padding: var(--space-7) var(--space-5);
+  overflow-y: auto;
+}
+
+.modal-overlay.aberto { display: flex; }
+
+.modal {
+  position: relative;
+  width: 100%;
+  max-width: 640px;
+  background: var(--color-white);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  padding: var(--space-6);
+}
+
+.modal-fechar {
+  position: absolute;
+  top: var(--space-4);
+  right: var(--space-4);
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-paper);
+  color: var(--color-slate);
+  cursor: pointer;
+  font-size: var(--text-base);
+  line-height: 1;
+}
+.modal-fechar:hover { border-color: var(--color-pine); color: var(--color-pine); }
+
+/* ---------- Conteúdo ---------- */
+.modal-header { margin-bottom: var(--space-5); padding-right: var(--space-7); }
+.modal-header .eyebrow { margin-bottom: var(--space-1); }
+.modal-header h3 { margin-bottom: var(--space-1); }
+.modal-header .modal-local { color: var(--color-slate); font-size: var(--text-sm); }
+
+.modal-precos {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-4);
+  padding: var(--space-4);
+  background: var(--color-paper);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-5);
+}
+.modal-precos .stat-label { font-size: var(--text-xs); color: var(--color-slate); text-transform: uppercase; letter-spacing: 0.03em; }
+.modal-precos .stat-value { font-family: var(--font-mono); font-size: var(--text-lg); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.modal-specs {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+}
+.modal-specs .spec { display: flex; flex-direction: column; gap: 2px; }
+.modal-specs .spec-label { font-size: var(--text-xs); color: var(--color-slate); text-transform: uppercase; letter-spacing: 0.03em; }
+.modal-specs .spec-value { font-family: var(--font-mono); font-size: var(--text-base); font-weight: 500; }
+
+.modal-tags { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-5); }
+.modal-tag {
+  font-size: var(--text-xs);
+  padding: 3px var(--space-3);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-sm);
+  color: var(--color-slate);
+}
+
+.modal-descricao {
+  font-size: var(--text-sm);
+  color: var(--color-slate);
+  margin-bottom: var(--space-5);
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.modal-footer { display: flex; justify-content: space-between; align-items: center; gap: var(--space-4); flex-wrap: wrap; }
+.modal-footer .modal-data { font-size: var(--text-xs); color: var(--color-slate); }
+
+@media (max-width: 560px) {
+  .modal-precos, .modal-specs { grid-template-columns: repeat(2, 1fr); }
+}

@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ImobData — Preço real de mercado dos imóveis em Curitiba</title>
+<meta name="description" content="Compare o preço anunciado de imóveis em Curitiba com o preço de mercado previsto por Machine Learning.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/layout.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/buscar.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/mapa.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/estatisticas.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/modal.css') }}">
+</head>
+<body>
+
+<header class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="#topo">
+      <svg viewBox="0 0 48 48" class="brand-mark" aria-hidden="true">
+        <path d="M24 4 L34 20 L29 20 L38 34 L27 34 L27 44 L21 44 L21 34 L10 34 L19 20 L14 20 Z" fill="currentColor"/>
+      </svg>
+      <span>ImobData<em>Curitiba</em></span>
+    </a>
+    <nav class="nav-links">
+      <a href="#buscar">Explorar</a>
+      <a href="#mapa">Mapa</a>
+      <a href="#bairros">Bairros</a>
+      <a href="#estatisticas">Estatísticas</a>
+    </nav>
+    <a class="nav-cta" href="#buscar">Ver imóveis</a>
+  </div>
+</header>
+
+<main id="topo">
+
+  <!-- ============ HERO ============ -->
+  <section class="hero">
+    <div class="hero-inner">
+      <p class="eyebrow">Dados reais · anúncios da OLX · modelo próprio de precificação</p>
+      <h1>O preço pedido nem sempre é o<br><span class="ink-accent">preço de mercado.</span></h1>
+      <p class="hero-sub">
+        Cruzamos anúncios reais de imóveis em Curitiba com um modelo de Machine Learning
+        treinado para estimar o valor justo de cada um — e mostramos, bairro a bairro,
+        quem está cobrando acima, abaixo ou dentro da faixa esperada.
+      </p>
+      <div class="hero-cta">
+        <a href="#buscar" class="btn btn-primary">Explorar imóveis</a>
+        <a href="#mapa" class="btn btn-ghost">Ver no mapa</a>
+      </div>
+
+      <div class="hero-stats" id="hero-stats">
+        <div class="stat"><span class="stat-value" data-loading="true" data-stat="total">—</span><span class="stat-label">imóveis analisados</span></div>
+        <div class="stat"><span class="stat-value" data-loading="true" data-stat="bairros">—</span><span class="stat-label">bairros cobertos</span></div>
+        <div class="stat stat-danger"><span class="stat-value" data-loading="true" data-stat="acima_do_mercado">—</span><span class="stat-label">acima do mercado</span></div>
+        <div class="stat stat-success"><span class="stat-value" data-loading="true" data-stat="abaixo_do_mercado">—</span><span class="stat-label">abaixo do mercado</span></div>
+      </div>
+    </div>
+    <svg class="hero-tree" viewBox="0 0 200 320" aria-hidden="true">
+      <path d="M100 10 L140 90 L118 90 L155 155 L112 155 L112 190 L88 190 L88 155 L45 155 L82 90 L60 90 Z" fill="currentColor"/>
+      <path d="M100 60 L132 130 L114 130 L145 185 L110 185 L110 210 L90 210 L90 185 L55 185 L86 130 L68 130 Z" fill="currentColor" opacity="0.5"/>
+      <rect x="94" y="190" width="12" height="110" fill="var(--color-slate)"/>
+    </svg>
+  </section>
+
+  <!-- ============ BUSCAR ============ -->
+  <section class="secao" id="buscar">
+    <div class="secao-head">
+      <p class="eyebrow">01 · Explorar</p>
+      <h2>Busque, filtre e compare</h2>
+      <p class="secao-sub">Clique em qualquer linha para ver os detalhes completos do imóvel.</p>
+    </div>
+
+    <div class="painel-busca">
+      <div class="filtros">
+        <div class="campo campo-lg">
+          <label for="f-busca">Buscar por título ou bairro</label>
+          <input type="text" id="f-busca" placeholder="Ex: Cabral, kitinet, Batel…">
+        </div>
+        <div class="campo">
+          <label for="f-bairro">Bairro</label>
+          <select id="f-bairro"><option value="">Todos</option></select>
+        </div>
+        <div class="campo">
+          <label for="f-status">Status</label>
+          <select id="f-status">
+            <option value="">Todos</option>
+            <option value="abaixo">🟢 Abaixo do mercado</option>
+            <option value="dentro">⚪ Dentro da faixa</option>
+            <option value="acima">🔴 Acima do mercado</option>
+          </select>
+        </div>
+        <div class="campo">
+          <label for="f-preco-min">Preço mín. (R$)</label>
+          <input type="number" id="f-preco-min" min="0" step="100" placeholder="0">
+        </div>
+        <div class="campo">
+          <label for="f-preco-max">Preço máx. (R$)</label>
+          <input type="number" id="f-preco-max" min="0" step="100" placeholder="Sem limite">
+        </div>
+        <div class="campo campo-sm">
+          <label for="f-quartos">Quartos (mín.)</label>
+          <select id="f-quartos">
+            <option value="">—</option>
+            <option value="1">1+</option>
+            <option value="2">2+</option>
+            <option value="3">3+</option>
+            <option value="4">4+</option>
+          </select>
+        </div>
+        <div class="campo campo-sm">
+          <label for="f-vagas">Vagas (mín.)</label>
+          <select id="f-vagas">
+            <option value="">—</option>
+            <option value="1">1+</option>
+            <option value="2">2+</option>
+            <option value="3">3+</option>
+          </select>
+        </div>
+        <div class="campo campo-actions">
+          <button class="btn btn-primary" id="btn-buscar">Buscar</button>
+          <button class="btn btn-link" id="btn-limpar">Limpar filtros</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="tabela-wrap">
+      <div class="tabela-toolbar">
+        <span id="tabela-contagem">Carregando…</span>
+        <div class="tabela-toolbar-right">
+          <label>Por página
+            <select id="f-per-page">
+              <option value="10">10</option>
+              <option value="20" selected>20</option>
+              <option value="50">50</option>
+            </select>
+          </label>
+        </div>
+      </div>
+
+      <div class="tabela-scroll">
+        <table class="tabela" id="tabela-imoveis">
+          <thead>
+            <tr>
+              <th data-sort="bairro">Bairro / Título</th>
+              <th data-sort="preco">Preço anunciado</th>
+              <th data-sort="preco_previsto">Preço de mercado</th>
+              <th data-sort="diferenca">Diferença</th>
+              <th>Status</th>
+              <th data-sort="metragem">m²</th>
+              <th data-sort="quartos">Quartos</th>
+            </tr>
+          </thead>
+          <tbody id="tabela-corpo">
+            <tr><td colspan="7" class="tabela-vazia">Carregando dados…</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="paginacao" id="paginacao"></div>
+    </div>
+  </section>
+
+  <!-- ============ MAPA ============ -->
+  <section class="secao secao-alt" id="mapa">
+    <div class="secao-head">
+      <p class="eyebrow">02 · Território</p>
+      <h2>Onde estão os melhores negócios</h2>
+      <p class="secao-sub">Verde é abaixo do mercado, cinza é dentro da faixa, vermelho é acima do mercado.</p>
+    </div>
+    <div id="leaflet-mapa"></div>
+    <p class="mapa-legenda">
+      <span><i class="ponto ponto-abaixo"></i> Abaixo do mercado</span>
+      <span><i class="ponto ponto-dentro"></i> Dentro da faixa</span>
+      <span><i class="ponto ponto-acima"></i> Acima do mercado</span>
+    </p>
+    <p class="mapa-aviso" id="mapa-aviso"></p>
+  </section>
+
+  <!-- ============ BAIRROS ============ -->
+  <section class="secao" id="bairros">
+    <div class="secao-head">
+      <p class="eyebrow">03 · Bairros</p>
+      <h2>Preço médio por bairro</h2>
+      <p class="secao-sub">Ordenado pelo número de imóveis analisados.</p>
+    </div>
+    <div class="bairros-grid">
+      <div class="bairros-chart-wrap">
+        <canvas id="chart-bairros"></canvas>
+      </div>
+      <div class="bairros-tabela-wrap">
+        <table class="tabela tabela-compacta" id="tabela-bairros">
+          <thead>
+            <tr><th>Bairro</th><th>Imóveis</th><th>Preço médio</th></tr>
+          </thead>
+          <tbody><tr><td colspan="3" class="tabela-vazia">Carregando…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ ESTATÍSTICAS ============ -->
+  <section class="secao secao-alt" id="estatisticas">
+    <div class="secao-head">
+      <p class="eyebrow">04 · Modelo</p>
+      <h2>Real x previsto: a distribuição completa</h2>
+      <p class="secao-sub" id="margem-erro-texto">Considerando a margem de erro do modelo, cada imóvel é classificado como acima, dentro ou abaixo do preço esperado.</p>
+    </div>
+    <div class="stats-grid">
+      <div class="stats-chart-wrap">
+        <canvas id="chart-distribuicao"></canvas>
+      </div>
+      <div class="stats-donut-wrap">
+        <canvas id="chart-status"></canvas>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="rodape">
+  <p>ImobData — dados de anúncios públicos da OLX, Curitiba/PR. Projeto de estudo, sem fins comerciais.</p>
+  <p class="rodape-links">Também disponível como dashboard Streamlit (execute <code>streamlit run dashboard.py</code>)</p>
+</footer>
+
+<!-- ============ MODAL DE DETALHES ============ -->
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal" role="dialog" aria-modal="true">
+    <button class="modal-fechar" id="modal-fechar" aria-label="Fechar">✕</button>
+    <div id="modal-conteudo"><p class="tabela-vazia">Carregando…</p></div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
