@@ -25,13 +25,16 @@
       </svg>
       <span>ImobData<em>Curitiba</em></span>
     </a>
-    <nav class="nav-links">
+    <nav class="nav-links" id="nav-links">
       <a href="#buscar">Explorar</a>
       <a href="#mapa">Mapa</a>
       <a href="#bairros">Bairros</a>
       <a href="#estatisticas">Estatísticas</a>
     </nav>
     <a class="nav-cta" href="#buscar">Ver imóveis</a>
+    <button class="nav-toggle" id="nav-toggle" aria-label="Abrir menu" aria-expanded="false">
+      <span></span><span></span><span></span>
+    </button>
   </div>
 </header>
 
@@ -171,7 +174,7 @@
       <h2>Onde estão os melhores negócios</h2>
       <p class="secao-sub">Verde é abaixo do mercado, cinza é dentro da faixa, vermelho é acima do mercado.</p>
     </div>
-    <div id="leaflet-mapa"></div>
+    <div id="leaflet-mapa"><p class="carregando">Carregando mapa…</p></div>
     <p class="mapa-legenda">
       <span><i class="ponto ponto-abaixo"></i> Abaixo do mercado</span>
       <span><i class="ponto ponto-dentro"></i> Dentro da faixa</span>
@@ -189,6 +192,7 @@
     </div>
     <div class="bairros-grid">
       <div class="bairros-chart-wrap">
+        <p class="carregando" data-carregando-de="chart-bairros">Carregando gráfico…</p>
         <canvas id="chart-bairros"></canvas>
       </div>
       <div class="bairros-tabela-wrap">
@@ -211,9 +215,11 @@
     </div>
     <div class="stats-grid">
       <div class="stats-chart-wrap">
+        <p class="carregando" data-carregando-de="chart-distribuicao">Carregando gráfico…</p>
         <canvas id="chart-distribuicao"></canvas>
       </div>
       <div class="stats-donut-wrap">
+        <p class="carregando" data-carregando-de="chart-status">Carregando gráfico…</p>
         <canvas id="chart-status"></canvas>
       </div>
     </div>

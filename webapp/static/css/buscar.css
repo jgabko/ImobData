@@ -146,6 +146,20 @@ table.tabela {
   color: var(--color-slate);
 }
 
+/* Estado de carregamento sobreposto a mapas/gráficos (removido via JS quando os dados chegam) */
+.carregando {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--color-slate);
+  background: var(--color-paper-alt);
+  z-index: 1;
+}
+
 .diferenca-positiva { color: var(--status-acima); }
 .diferenca-negativa { color: var(--status-abaixo); }
 

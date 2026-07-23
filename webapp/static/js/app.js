@@ -37,6 +37,7 @@
   }
 
   document.addEventListener("DOMContentLoaded", () => {
+    inicializarNavMobile();
     carregarKpisHero();
     inicializarBusca();
     inicializarMapa();
@@ -44,6 +45,27 @@
     inicializarEstatisticas();
     inicializarModal();
   });
+
+  /* ==========================================================
+     Etapa 7 — Menu mobile
+     ========================================================== */
+  function inicializarNavMobile() {
+    const botao = document.getElementById("nav-toggle");
+    const links = document.getElementById("nav-links");
+    if (!botao || !links) return;
+
+    botao.addEventListener("click", () => {
+      const aberto = links.classList.toggle("aberto");
+      botao.setAttribute("aria-expanded", String(aberto));
+    });
+
+    links.querySelectorAll("a").forEach((link) => {
+      link.addEventListener("click", () => {
+        links.classList.remove("aberto");
+        botao.setAttribute("aria-expanded", "false");
+      });
+    });
+  }
 
   /* ==========================================================
      Etapa 3 — Busca, filtros, tabela e paginação
@@ -260,6 +282,7 @@
     if (!container || typeof L === "undefined") return;
 
     const mapa = L.map(container, { scrollWheelZoom: false }).setView(CENTRO_CURITIBA, 12);
+    container.querySelector(".carregando")?.remove();
 
     L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
@@ -332,6 +355,10 @@
     }).format(valor);
   }
 
+  function removerCarregando(id) {
+    document.querySelector(`[data-carregando-de="${id}"]`)?.remove();
+  }
+
   async function inicializarBairros() {
     const canvas = document.getElementById("chart-bairros");
     const corpoTabela = document.querySelector("#tabela-bairros tbody");
@@ -397,6 +424,8 @@
     } catch (erro) {
       console.error("Não foi possível carregar /api/bairros:", erro);
       if (corpoTabela) corpoTabela.innerHTML = `<tr><td colspan="3" class="tabela-vazia">Erro ao carregar bairros.</td></tr>`;
+    } finally {
+      removerCarregando("chart-bairros");
     }
   }
 
@@ -507,6 +536,9 @@
       }
     } catch (erro) {
       console.error("Não foi possível carregar dados de estatísticas:", erro);
+    } finally {
+      removerCarregando("chart-distribuicao");
+      removerCarregando("chart-status");
     }
   }
 
