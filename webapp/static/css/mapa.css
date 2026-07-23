@@ -1,0 +1,58 @@
+/* ============================================================
+   ImobData — Mapa (Etapa 4)
+   Depende de css/base.css e css/layout.css.
+   ============================================================ */
+
+#leaflet-mapa {
+  width: 100%;
+  height: 520px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-line);
+  overflow: hidden;
+  background: var(--color-paper-alt);
+}
+
+/* Popup do Leaflet reestilizado para seguir o design system */
+.leaflet-popup-content-wrapper {
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+
+.leaflet-popup-content { margin: var(--space-3) var(--space-4); font-family: var(--font-body); }
+
+.popup-imovel { display: flex; flex-direction: column; gap: var(--space-2); min-width: 200px; }
+.popup-imovel strong { font-family: var(--font-display); font-size: var(--text-base); color: var(--color-ink); }
+.popup-imovel .popup-bairro { font-size: var(--text-xs); color: var(--color-slate); text-transform: uppercase; letter-spacing: 0.04em; }
+.popup-imovel .popup-precos { font-family: var(--font-mono); font-size: var(--text-sm); display: flex; flex-direction: column; gap: 2px; }
+.popup-imovel .popup-link { font-size: var(--text-sm); color: var(--color-pine); font-weight: 600; }
+.popup-imovel .popup-link:hover { text-decoration: underline; }
+
+/* ---------- Legenda ---------- */
+.mapa-legenda {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+  margin-top: var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--color-slate);
+}
+
+.mapa-legenda span { display: inline-flex; align-items: center; gap: var(--space-2); }
+
+.ponto {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+}
+
+.ponto-abaixo { background: var(--status-abaixo); }
+.ponto-dentro { background: var(--status-dentro); }
+.ponto-acima  { background: var(--status-acima); }
+
+.mapa-aviso {
+  margin-top: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-slate);
+}

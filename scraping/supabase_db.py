@@ -1,46 +1,95 @@
-import os
-from supabase import create_client, Client
-from dotenv import load_dotenv
+"""
+Camada de gravação usada pelo scraper (olx_async.py) para salvar imóveis
+raspados. Antes usava Supabase; agora grava direto no SQLite local.
 
-# Carrega as variáveis de ambiente do arquivo .env
-load_dotenv()
+Mantém os mesmos nomes de função (get_supabase_client / salvar_no_supabase)
+por compatibilidade, mesmo não havendo mais "cliente" de fato — só que
+get_supabase_client agora retorna a conexão sqlite3.
+"""
+import json
+import sqlite3
 
-SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+from persistence.db import get_connection, init_db
 
-def get_supabase_client() -> Client:
-    """
-    Inicializa e retorna o cliente do Supabase.
-    """
-    if not SUPABASE_URL or not SUPABASE_KEY:
-        raise ValueError("As credenciais do Supabase não foram encontradas. Verifique o seu arquivo .env.")
-    return create_client(SUPABASE_URL, SUPABASE_KEY)
+
+def _serializar_valor(v):
+    """SQLite só aceita tipos primitivos (str, int, float, bytes, None).
+    Campos como listas (ex: caracteristicas_imovel: List[str]) ou dicts
+    precisam virar uma string JSON antes de serem gravados."""
+    if isinstance(v, (list, dict)):
+        return json.dumps(v, ensure_ascii=False)
+    return v
+
+# Garante que as tabelas existem assim que este módulo é importado
+init_db()
+
+
+def get_supabase_client() -> sqlite3.Connection:
+    """Mantido por compatibilidade com o código antigo. Retorna uma conexão
+    sqlite3 em vez de um cliente Supabase."""
+    return get_connection()
+
+
+def _garantir_colunas(conn, nome_tabela: str, colunas_necessarias: list[str]):
+    """Adiciona automaticamente qualquer coluna que apareça nos dados
+    raspados mas ainda não exista na tabela local. Isso evita que o
+    scraper quebre sempre que o schema do site (e portanto do
+    ImovelCuritibaSchema) ganhar um campo novo."""
+    cur = conn.execute(f"PRAGMA table_info({nome_tabela})")
+    colunas_existentes = {row[1] for row in cur.fetchall()}  # row[1] = nome da coluna
+
+    for coluna in colunas_necessarias:
+        if coluna not in colunas_existentes:
+            print(f"[BANCO DE DADOS] Coluna '{coluna}' não existe em '{nome_tabela}' — criando (tipo TEXT).")
+            conn.execute(f"ALTER TABLE {nome_tabela} ADD COLUMN {coluna} TEXT")
+    conn.commit()
+
 
 def salvar_no_supabase(dados: list[dict], nome_tabela: str = "imoveis_raw"):
     """
-    Recebe uma lista de dicionários e realiza um UPSERT na tabela do Supabase.
-    Ignora registros que já possuam a mesma URL cadastrada (evita duplicatas).
+    Recebe uma lista de dicionários e realiza um INSERT OR IGNORE na tabela
+    local. Registros cuja 'url' já exista são simplesmente ignorados
+    (mesmo comportamento do upsert com ignore_duplicates=True que era usado
+    no Supabase).
     """
     if not dados:
-        print("Aviso: Nenhum dado disponível para enviar ao Supabase.")
+        print("Aviso: Nenhum dado disponível para salvar.")
         return None
 
-    supabase = get_supabase_client()
-    
+    conn = get_connection()
     try:
         print(f"\n[BANCO DE DADOS] Tentando inserir {len(dados)} imóveis na tabela '{nome_tabela}'...")
-        
-        # O método UPSERT verifica a coluna 'url'. 
-        # Se a url já existir, 'ignore_duplicates=True' faz ele pular e não dar erro.
-        resposta = supabase.table(nome_tabela).upsert(
-            dados, 
-            on_conflict="url", 
-            ignore_duplicates=True
-        ).execute()
-        
-        print(f"✅ Processamento concluído! Registros novos salvos no banco. (Duplicatas ignoradas).")
-        return resposta.data
-        
+
+        # Colunas dinâmicas: junta as chaves de TODOS os dicts (não só o
+        # primeiro), já que registros diferentes podem ter campos opcionais
+        # ausentes em uns e presentes em outros.
+        colunas = sorted({chave for registro in dados for chave in registro.keys()})
+
+        # Garante que a tabela tenha todas essas colunas antes de inserir
+        _garantir_colunas(conn, nome_tabela, colunas)
+        placeholders = ", ".join("?" for _ in colunas)
+        colunas_sql = ", ".join(colunas)
+
+        query = (
+            f"INSERT OR IGNORE INTO {nome_tabela} ({colunas_sql}) "
+            f"VALUES ({placeholders})"
+        )
+
+        valores = [tuple(_serializar_valor(d.get(c)) for c in colunas) for d in dados]
+
+        cur = conn.cursor()
+        cur.executemany(query, valores)
+        conn.commit()
+
+        inseridos = cur.rowcount if cur.rowcount is not None else 0
+        print(
+            f"✅ Processamento concluído! {inseridos} registro(s) novo(s) salvo(s). "
+            f"(Duplicatas por 'url' ignoradas)."
+        )
+        return valores
     except Exception as e:
-        print(f"❌ Erro ao inserir dados no Supabase: {e}")
+        conn.rollback()
+        print(f"❌ Erro ao inserir dados no banco local: {e}")
         return None
+    finally:
+        conn.close()
